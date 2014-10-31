@@ -1,0 +1,158 @@
+library(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+
+
+tesla_prices = get.hist.quote(instrument = "tsla", start = "2010-01-02", end = "2014-10-01",
+                             quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                             retclass = "zoo") # import of Tesla Motors prices per day
+
+tesla_returns = diff(log(tesla_prices)) # calculate the returns of Tesla Motors stock
+
+plot(tesla_returns, type="l") # create a chart of Tesla returns
+basicStats(tesla_returns) # decriptive statistic
+#AdjClose
+#nobs        1072.000000
+#NAs            0.000000
+#Minimum       -0.214772
+#Maximum        0.218292
+#1. Quartile   -0.016372
+#3. Quartile    0.020169
+#Mean           0.002153
+#Median         0.001223
+#Sum            2.308178
+#SE Mean        0.001118
+#LCL Mean      -0.000040
+#UCL Mean       0.004346
+#Variance       0.001339
+#Stdev          0.036594
+#Skewness       0.157235
+#Kurtosis       5.565060
+
+histPlot(timeSeries(tesla_returns)) # it looks like general hyperbolic density
+qqnormPlot(tesla_returns)
+jarqueberaTest(tesla_returns)
+
+#Jarque - Bera Normalality Test
+#Test Results:
+#  STATISTIC:
+#  X-squared: 1395.7179
+# P VALUE:
+#  Asymptotic p Value: < 2.2e-16 
+
+#Description:
+#  Tue Oct 21 08:53:28 2014 by user: asbelo
+# p-value - is too small. There is hight probability of abnormal densuty. 
+
+# lets fit an appropriate density for current returns
+library(ghyp)
+tesla.ghyp <- fit.ghypuv(tesla_returns,symmetric=FALSE,silent=TRUE)
+hist(tesla.ghyp) # density to compare hyperbolic, normal and current returnes 
+qqghyp(tesla.ghyp, ghyp.col="red") #the tails of GHD is most accurate align due quantile line 
+
+tesla.t <- fit.tuv(tesla_returns,symmetric=FALSE,silent=TRUE)
+lik.ratio.test(tesla.ghyp,tesla.t,conf.level=0.95)
+# $statistic
+# L = 0.7130096 
+# $p.value = 0.4107873
+# $df = 1
+# $H0 = TRUE
+
+aic.uv <- stepAIC.ghyp(tesla_returns, dist=c("gauss", "t", "ghyp"),symmetric=NULL, silent = TRUE)
+summary(aic.uv$best.model)
+
+# VaR 
+alpha <- 0.1; N <- 10^6
+tesla.sim <- rghyp(n=N,object=aic.uv$best.model)
+tesla.sim <- sort(tesla.sim)
+VaR1 <- tesla.sim[alpha*N]
+# VaR1 = -0.0361253
+ES <- mean(tesla.sim[1:(alpha*N-1)])
+# ES = -0.06424265
+
+# VaR curve 
+T <- length(tesla_returns)
+# devide dataset on training sample and examining sample
+T1 <- 2*260; T2 <- T - T1
+VaR <- numeric()
+  h <- T1
+  for (i in (T1+1):(T1+T2)) {
+  h.tesla <- tesla_returns[(i-h):(i-1)]
+  tesla.fit <- stepAIC.ghyp(h.tesla,dist=c("gauss","t","ghyp"), symmetric=NULL,silent=TRUE)
+  VaR[i-T1] <- qghyp(alpha,object=tesla.fit$best.model)
+}
+
+fact <- tesla_returns[(T1+1):(T1+T2)]
+plot(fact,type="l")
+  plot(VaR,col="red")
+
+# Kupiec test
+
+K <- sum(fact<VaR); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+
+# alpha = 0.1
+# alpha0 = 0.09601449
+# p.value = 0.7535189 Too hight and meens risk overfitting 
+
+L.Lo <- sum((fact-VaR)^2*(fact<VaR))/K
+L.BI <- sum((fact-VaR)/VaR*(fact<VaR))/K
+
+# L.Lo = 0.00130841
+# L.BI = 0.6770807
+
+
+# starting simulation with normal distribution
+
+library(ghyp)
+tesla.norm <- fit.gaussuv(tesla_returns)
+hist(tesla.norm) 
+tesla.t <- fit.tuv(tesla_returns,symmetric=FALSE,silent=TRUE)
+lik.ratio.test(tesla.norm,tesla.t,conf.level=0.90)
+
+aic.uv <- stepAIC.ghyp(tesla_returns, dist=c("gauss", "t", "ghyp"),symmetric=NULL, silent = TRUE)
+summary(aic.uv$best.model)
+
+#VaR norm density 
+alpha <- 0.1; N <- 10^6
+tesla.sim <- rnorm(n=N,mean = mean(tesla_returns), sd=sd(tesla_returns))
+tesla.sim <- sort(tesla.sim)
+VaRnorm <- tesla.sim[alpha*N]
+# VaRnorm = -0.04473397
+ESnorm <- mean(tesla.sim[1:(alpha*N-1)])
+# ES = -0.06200528
+
+# VaRnorm curve 
+T <- length(tesla_returns)
+# devide dataset on training sample and examining sample
+T1 <- 2*260; T2 <- T - T1
+VaRnorm2 <- numeric()
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  h.tesla2 <- tesla_returns[(i-h):(i-1)]
+  tesla.fit <- stepAIC.ghyp(h.tesla2,dist=c("gauss", "t", "ghyp"), symmetric=NULL,silent=TRUE)
+  VaRnorm2[i-T1] <- qnorm(alpha,mean = mean(tesla_returns), sd=sd(tesla_returns))
+}
+
+factnorm <- tesla_returns[(T1+1):(T1+T2)]
+plot(fact,type="l")
+plot(VaRnorm2,col="red")
+
+# Kupiec test
+
+K <- sum(factnorm<VaRnorm2); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+
+# alpha = 0.1
+# alpha0 = 0.05797101
+# p.value = 0.0003914853 Is rather low  
+
+L.Lo <- sum((factnorm-VaRnorm2)^2*(factnorm<VaRnorm2))/K
+L.BI <- sum((factnorm-VaRnorm2)/VaRnorm2*(factnorm<VaRnorm2))/K
+
+# L.Lo = 0.0009341007
+# L.BI = 0.3631357 # it means that losses of VaRnorm smaller than losses of VaR based on ghyp distribution. 
+
