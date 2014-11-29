@@ -1,0 +1,105 @@
+Enter file contents herelibrary(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+library(datasets)
+library(ghyp)
+library(copula)
+
+
+MSFT_prices = get.hist.quote(instrument = "MSFT", start = "2010-01-02", end = "2014-10-01",
+                              quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                              retclass = "zoo") # Загрузил цены акций Микрософт
+
+MSFT = diff(log(MSFT_prices)) # рассчитал доходности по акциям Микрософт
+
+
+MCD_prices = get.hist.quote(instrument = "MCD", start = "2010-01-02", end = "2014-10-01",
+                             quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                             retclass = "zoo") # Загрузил цены акций Гугл
+
+
+MCD = diff(log(MCD_prices)) # рассчитал доходности по акциям Гугл
+length(MCD)
+length(MSFT)
+
+
+# моделируем частные функции распределения
+norm.fit <- fitCopula(cdf,copula=norm.cop)
+MSFT.fit <- stepAIC.ghyp(MSFT,dist=c("gauss","t","ghyp"), symmetric=NULL,silent=TRUE)$best.model
+MCD.fit <- stepAIC.ghyp(MCD,dist=c("gauss","t","ghyp"), symmetric=NULL,silent=TRUE)$best.model
+
+
+
+# рассчитываем функции плотности вероятности
+MSFT.cdf <- pghyp(MSFT,object=MSFT.fit)
+MCD.cdf <- pghyp(MCD,object=MCD.fit)
+cdf <- array(c(MSFT.cdf,MCD.cdf),dim=c(1193,2))
+
+
+length(MSFT)
+length(MCD)
+# объявление копул
+norm.cop <- normalCopula(dim=2,param=0.5,dispstr="un") # копула Гауса
+stud.cop <- tCopula(dim=2,param=0.5,df=5, df.fixed=TRUE,dispstr="un") # копула Стьюдента
+gumb.cop <- gumbelCopula(dim=2,param=2) # копула Гумбеля
+clay.cop <- claytonCopula(dim=2,param=2) # копула Клейтона 
+
+# подгонка копулы
+norm.fit <- fitCopula(cdf,copula=norm.cop)
+stud.fit <- fitCopula(cdf,copula=stud.cop)
+gumb.fit <- fitCopula(cdf,copula=gumb.cop)
+clay.fit <- fitCopula(cdf,copula=clay.cop)
+
+norm.fit@loglik 
+stud.fit@loglik 
+gumb.fit@loglik 
+clay.fit@loglik
+
+# значения частных функций распределения
+N <- 10^4
+stud.sim <- rCopula(n=N,copula=stud.fit@copula)
+
+# доходности активов
+MSFT.sim <- qghyp(stud.sim[,1],object=MSFT.fit)
+MCD.sim <- qghyp(stud.sim[,2],object=MCD.fit)
+w <- c(0.5,0.5)
+prt.sim <- w[1]*MSFT.sim + w[2]*MCD.sim # доходность портфеля
+
+plot(prt.sim)
+qqnorm(prt.sim)
+
+# измерители риска
+alpha <- 0.1
+prt.sim <- sort(prt.sim)
+VaR <- prt.sim[alpha*N]
+ES <- mean(prt.sim[1:(alpha*N-1)])
+
+VaR
+ES
+
+# VaR curve 
+T <- length(prt.sim)
+T1 <- 500; T2 <- 500
+VaR <- numeric()
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  h.prt <- prt.sim[(i-h):(i-1)]
+  prt.fit <- stepAIC.ghyp(h.prt,dist=c("gauss","t","ghyp","nig"), symmetric=NULL,silent=TRUE)
+  VaR[i-T1] <- qghyp(alpha,object=prt.fit$best.model)
+}
+
+fact <- prt.sim[(T1+1):(T1+T2)]
+plot(fact,type="l")
+lines(VaR,col="red",lwd=2)
+
+K <- sum(factnorm<VaRnorm2); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+
+L.Lo <- sum((factnorm-VaRnorm2)^2*(factnorm<VaRnorm2))/K
+L.BI <- sum((factnorm-VaRnorm2)/VaRnorm2*(factnorm<VaRnorm2))/K
+
+L.Lo
+L.BI
+
