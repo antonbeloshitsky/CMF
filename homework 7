@@ -1,0 +1,89 @@
+Enter file contents herelibrary(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+library(datasets)
+library(ghyp)
+library(copula)
+library(evd)
+
+MSFT_prices = get.hist.quote(instrument = "MSFT", start = "2010-01-02", end = "2014-10-01",
+                             quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                             retclass = "zoo") # Загрузил цены акций Микрософт
+
+MSFT = -diff(log(MSFT_prices)) # рассчитал доходности по акциям Микрософт
+
+n <- 90; m <- 12; T <- m*n
+
+histPlot(timeSeries(MSFT))
+
+# расчёт максим
+Mn <- rep(0,times=m)
+for (i in 1:m)
+  Mn[i] <- max(MSFT[((i-1)*n+1):(i*n)])
+
+histPlot(timeSeries(Mn))
+
+library(evd)
+Mn.fit <- fgev(Mn)
+plot(Mn.fit)
+
+mu <- Mn.fit$estimate[1]
+sigma <- Mn.fit$estimate[2]
+
+xi <- Mn.fit$estimate[3]
+k <- 5
+u <- 0.10
+
+r.nk <- mu+sigma/xi*((-log(1-1/k))^(-xi)-1)
+k.nr <- 1/(1-pgev(u,loc=mu,scale=sigma,shape=xi))
+
+
+
+
+# Pareto
+# пороговое значение - 95% квантиль
+
+library(quantmod)
+QWERTY <- getSymbols("MSFT", src="yahoo")
+
+Y <- (MSFT$MSFT.Adjusted)
+n <- 90; m <- 20; T <- m*n
+
+MSFT2 = -diff(log(Y))
+u <- sort(MSFT2)[0.95*T]
+
+length(MSFT2)
+
+gpd.fit <- fpot(MSFT2,threshold=u,model="gpd",method="SANN")
+beta <- gpd.fit$estimate[1]; xi <- gpd.fit$estimate[2]
+
+Fu <- gpd.fit$pat
+alpha <- 1-1/260 # соответствует k = 4
+VaR <- u+beta/xi*(((1-alpha)/Fu)^(-xi)-1)
+ES <- (VaR+beta-xi*u)/(1-xi)
+
+
+
+# VaR curve 
+T <- length(MSFT2)
+# devide dataset on training sample and examining sample
+T1 <- 600; T2 <- T - T1
+VaR <- numeric()
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  h.MSFT <- MSFT2[(i-h):(i-1)]
+  MSFT.fit <- stepAIC.ghyp(h.MSFT,dist=c("gauss","t","ghyp","nig"), symmetric=NULL,silent=TRUE)
+  VaR[i-T1] <- qghyp(alpha,object=MSFT.fit$best.model)
+}
+
+fact <- MSFT2[(T1+1):(T1+T2)]
+plot(fact,type="l")
+plot(VaR, type="l")
+
+# Kupiec test
+
+K <- sum(fact<VaR); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+
