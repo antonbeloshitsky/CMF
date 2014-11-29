@@ -1,0 +1,131 @@
+Enter file contents herelibrary(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+library(stats)
+
+MSFT_prices = get.hist.quote(instrument = "MSFT", start = "2010-01-02", end = "2014-10-01",
+                              quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                              retclass = "zoo") # Загрузил цены акций Микрософт
+
+MSFT = diff(log(tesla_prices)) # рассчитал доходности по акйиям Микрософт
+length(MSFT)
+
+library(tseries)
+adf.test(MSFT) # ряд стационарен
+pp.test(MSFT) # ряд стационарен
+kpss.test(MSFT) # ряд не нестационарен
+
+library(FinTS)
+ArchTest(MSFT,lags=6) # нет авторегресси и гетероскедостичности
+
+library(stats)
+POISK <- function(x) {
+  aic<-matrix(NA,5,5)
+  for(i in 1:5){
+    for(j in 1:5){
+      aic[i,j] <- AIC(arima(x, order = c(i, 0, j)))
+    }
+  }
+  as.vector(which(aic == min(aic), arr.ind = TRUE))
+}
+POISK(MSFT)
+
+library(fGarch)
+summary(garchFit(formula=~arma(1,3)+garch(1,5), data = MSFT))
+
+
+MSFT.fit <- garchFit(formula=~arma(1,3)+garch(1,5), data = MSFT)
+plot(MSFT.fit, which=13)
+plot(MSFT.fit, which=10)
+
+MSFT.fut <- predict(MSFT.fit,n.ahead=i)
+alpha <- 0.05
+VaR <- MSFT.fut[1,1]+MSFT.fut[1,3]*qged(alpha,mean=0,sd=1)
+T1 <- 500
+T2 <- length(MSFT)-T1
+
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  hMSFT <- MSFT[(i-h):(i-1)]
+  MSFTfit <- garchFit(formula=~arma(1,3)+garch(1,5),data=hMSFT, delta=2,include.delta=FALSE,leverage=TRUE,cond.dist="sged", shape=1.5,include.shape=FALSE,trace=FALSE)
+  MSFTfut <- predict(MSFTfit,n.ahead=1)
+  VaR[i-T1] <- MSFTfut[1,1]+MSFTfut[1,3]*qsged(alpha,mean=0,sd=1,nu=1.5,xi=MSFTfit@fit$par["skew"])
+}
+fact <- MSFT[(T1+1):(T1+T2)]
+plot(fact,type="l")
+lines(VaR,col="red",lwd=2)
+
+
+
+K <- sum(fact<VaR); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+
+  2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+p.value
+L.Lo <- sum((fact-VaR)^2*(fact<VaR))/K
+L.BI <- sum((fact-VaR)/VaR*(fact<VaR))/K
+L.Lo
+L.BI
+
+
+
+
+
+
+
+
+library(fGarch)
+Tesla.gfit <- garchFit(formula=~arma(0,3)+aparch(1,2), data=tesla_returns, cont.dist="norm", include.delta=TRUE, leverage=TRUE, trace=FALSE) 
+
+aic.uv <- stepAIC.ghyp(tesla_returns, dist=c("gauss","t","ghyp"),symmetric=NULL, silent = TRUE)
+summary(aic.uv$best.model)
+
+#попробовал разные варианты m,n,p,q. Книга Магнуса гласит,
+# что следует выбирать модель с наименьшим AIC, но в моем случае AIC вездеоставлася неизменным при любых m,n,p,q.
+# при следующих m,n,p,q подгон моделей не выдавал ошибок [1,2] [1,3];  [0,3] [1,2]; [0,4] [1,2];  [0,4] [1,3];  [0,4] [2,3] 
+
+#GARCH(1,1)
+garchFit(formula=~aparch(1,1),data=tesla_returns, delta=2, include.delta=FALSE,leverage=FALSE, trace=FALSE)  
+
+#TS-GARCH(1,1)
+garchFit(formula=~aparch(1,1),data=tesla_returns, delta=1, include.delta=FALSE,leverage=FALSE, trace=FALSE)  
+
+#T-GARCH(1.1)
+garchFit(formula=~aparch(1,1),data=tesla_returns, delta=2, include.delta=FALSE,leverage=TRUE, trace=FALSE) 
+
+?rnorm
+
+# VaR
+alpha <- 0.1; N <- 10^6
+VaR <- qghyp(alpha,object=aic.uv$best.model)
+VaR
+
+# VaR curve 
+T <- length(MSFT)
+# делим выборку на тестовую и экзаменующую 
+T1 <- 500; T2 <- T - T1
+VaR <- numeric()
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  h.MSFT <- MSFT[(i-h):(i-1)]
+  MSFT.fit <- garchFit(formula=~arma(1,3)+garch(1,5),data=h.MSFT, delta=2,include.delta=FALSE,leverage=TRUE,cond.dist="norm", shape=1.5,include.shape=FALSE,trace=TRUE)
+  MSFT.frc <- predict(MSFT.gfit,n.ahead=1)
+  VaR[i-T1] <- tesla.frc[1,1]+tesla.frc[1,3]*qsged(alpha,mean=0,sd=1, nu=1.5,xi=tesla.gfit@fit$par["skew"])
+}
+
+
+fact <- tesla_returns[(T1+1):(T1+T2)]
+plot(fact,type="l") 
+abline(VaR,col="red",type="l")
+
+# Kupiec test
+K <- sum(fact<VaR); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+ 2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+p.value
+
+L.Lo <- sum((fact-VaR)^2*(fact<VaR))/K
+L.BI <- sum((fact-VaR)/VaR*(fact<VaR))/K
+L.Lo
+L.BI
