@@ -1,0 +1,103 @@
+Enter file contents herelibrary(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+library(datasets)
+library(ghyp)
+library(copula)
+
+
+MSFT_prices = get.hist.quote(instrument = "MSFT", start = "2010-01-02", end = "2014-10-01",
+                             quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                             retclass = "zoo") # Загрузил цены акций Микрософт
+
+MSFT = diff(log(MSFT_prices)) # рассчитал доходности по акциям Микрософт
+
+
+MCD_prices = get.hist.quote(instrument = "MCD", start = "2010-01-02", end = "2014-10-01",
+                            quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                            retclass = "zoo") # Загрузил цены акций Гугл
+
+
+MCD = diff(log(MCD_prices)) # рассчитал доходности по акциям Гугл
+
+# строим одномерные GARCH-модели 
+library(fGarch)
+MSFT.gfit <- garchFit(data=MSFT,formula=~garch(1,1),shape=1.25,include.shape=F,cond.dist="ged",trace=F)
+MCD.gfit <- garchFit(data=MCD,formula=~garch(1,1),shape=1.3,include.shape=F,cond.dist="sged",trace=F)
+
+# строим матрицу стандартизированных остатков
+z <- matrix(nrow=length(MSFT),ncol=2)
+z[,1] <- MSFT.gfit@residuals/MSFT.gfit@sigma.t
+z[,2] <- MCD.gfit@residuals / MCD.gfit@sigma.t
+
+# частные распределения остатков
+mean <- c(0,0); sd <- c(1,1); nu <- c(1.25,1.3)
+xi <- c(1,MCD.gfit@fit$par["skew"])
+cdf <- matrix(nrow=length(MSFT),ncol=2)
+for (i in 1:2) 
+  cdf[,i] <- psged(z[,i],
+  mean=mean[i], sd=sd[i],nu=nu[i],xi=xi[i])
+
+# подгонка копул
+norm.fit <- fitCopula(cdf,copula=norm.cop)
+stud.fit <- fitCopula(cdf,copula=stud.cop)
+gumb.fit <- fitCopula(cdf,copula=gumb.cop)
+clay.fit <- fitCopula(cdf,copula=clay.cop)
+
+norm.fit@loglik 
+stud.fit@loglik 
+gumb.fit@loglik 
+clay.fit@loglik
+
+# метод Монте-Карло
+N=10000
+cdf.sim <- rCopula(n=N,copula=stud.fit@copula)
+z.sim <- matrix(nrow=N,ncol=2)
+for (i in 1:2) z.sim[,i] <- qsged(cdf.sim[,i], mean=mean[i],sd=sd[i],nu=nu[i],xi=xi[i])
+frc1 <- predict(MSFT.gfit,n.ahead=1)
+frc2 <- predict(MCD.gfit,n.ahead=1)
+mu <- c(frc1[,1],frc2[,1])
+sigma <- c(frc1[,3],frc2[,3])
+
+# модельные доходности портфеля
+prt.sim <- w[1]*(mu[1]+sigma[1]*z.sim[,1]) +  w[2]*(mu[2]+sigma[2]*z.sim[,2])
+# измерители риска
+prt.sim <- sort(prt.sim)
+VaR <- prt.sim[alpha*N]
+ES <- mean(prt.sim[1:(alpha*N-1)])
+
+VaR
+ES
+
+plot(prt.sim,type = "l")
+
+# VaR curve 
+T <- length(prt.sim)
+T1 <- 1000; T2 <- 500
+
+VaR <- numeric()
+h <- 500
+for (i in (T1+1):(T1+T2)) {
+  h.prt <- prt.sim[(i-h):(i-1)]
+  prt.gfit <- garchFit(formula=~aparch(1,1),data=h.prt,delta=2,include.delta=FALSE,leverage=TRUE,cond.dist="sged", shape=1.5,include.shape=FALSE,trace=FALSE)
+  prt.frc <- predict(prt.gfit,n.ahead=1)
+  VaR[i-T1] <- prt.frc[1,1]+prt.frc[1,3]*qsged(alpha,mean=0,sd=1, nu=1.5,xi=prt.gfit@fit$par["skew"])
+}
+
+
+fact <- prt.sim[(T1+1):(T1+T2)]
+plot(fact,type="l")
+lines(VaR,col="red",lwd=1)
+
+K <- sum(factnorm<VaRnorm2); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+p.value
+
+L.Lo <- sum((factnorm-VaRnorm2)^2*(factnorm<VaRnorm2))/K
+L.BI <- sum((factnorm-VaRnorm2)/VaRnorm2*(factnorm<VaRnorm2))/K
+
+L.Lo
+L.BI
+
