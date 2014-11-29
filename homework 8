@@ -1,0 +1,204 @@
+Enter file contents herelibrary(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+library(datasets)
+library(ghyp)
+library(copula)
+library(evd)
+
+SP500 = get.hist.quote(instrument = "^GSPC", start = "2010-01-02", end = "2014-10-01",
+                             quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                             retclass = "zoo") # Загрузил индекс S&P500
+
+SP = -diff(log(SP500)) # рассчитал доходности по индексу
+
+
+
+NASDAQ = get.hist.quote(instrument = "^IXIC", start = "2010-01-03", end = "2014-10-01",
+                       quote = "AdjClose", provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                       retclass = "zoo") # Загрузил индекс NASDAQ 
+
+NAS = -diff(log(NASDAQ)) # рассчитал доходности по индексу NASDAQ
+
+
+n <- 90; m <- 12; T <- m*n
+
+
+library(MASS)
+DEN <-kde2d(SP,NAS)
+persp(DEN, box=T, xlab = "SP", ylab = "NAS")
+
+
+ESM <- cbind(SP,NAS) # сформируем матрицу убытков
+
+Mn <- rep(0,times=m*2)
+dim(Mn) <- c(m,2)
+for (i in 1:2) {
+  for (j in 1:m)
+    Mn[j,i] <- max(ESM[((j-1)*n+1):(j*n),i])
+}
+
+# сформировали матрицу максимальных убытков из 12 блоков (Mn)
+
+# подбираем параметр обощенного распределенияэкстрим значения
+fit1 <- fgev(Mn[,1])
+fit2 <- fgev(Mn[,2])
+plot(fit1)
+plot(fit2)
+
+# экстремальные копулы
+library(copula)
+gumb.cop <- gumbelCopula(2)
+gal.cop <- galambosCopula(2)
+
+# значения частных функций распределения
+cdf1 <- pgev(Mn[,1],loc=fit1$estimate[1],scale=fit1$estimate[2],shape=fit1$estimate[3])
+cdf2 <- pgev(Mn[,2],loc=fit2$estimate[1],scale=fit2$estimate[2],shape=fit2$estimate[3])
+cdf <- cbind(cdf1,cdf2)
+
+
+# подгонка копулы
+gumb.fit <- fitCopula(cdf,copula=gumb.cop)
+gal.fit <- fitCopula(cdf,copula=gal.cop)
+
+gumb.fit@loglik
+gal.fit@loglik
+
+
+# модельные значения максим
+N <- 10^5
+cdf.sim <- rCopula(n=N,copula=gal.fit@copula)
+sim1 <- qgev(cdf.sim[,1],loc=fit1$estimate[1], scale=fit1$estimate[2],shape=fit1$estimate[3])
+sim2 <- qgev(cdf.sim[,2],loc=fit2$estimate[1], scale=fit2$estimate[2],shape=fit2$estimate[3])
+
+# модельные убытки
+w <- c(0.9,0.1)
+loss <- sort(w[1]*sim1+w[2]*sim2)
+
+# расчёт мер риска
+k <- 4
+alpha <- 1-1/k
+VaR <- loss[alpha*N]
+ES <- mean(loss[(alpha*N+1):N])
+
+VaR
+ES 
+
+start = "2010-01-02", end = "2014-10-01"
+
+
+#Парето
+# выборка значений, превышающих многомерный порог
+
+library(quantmod)
+QWERTYSP <- getSymbols("^GSPC", src="yahoo")
+QWERTYNAS <- getSymbols("^IXIC", src="yahoo")
+
+SP_index <- (GSPC$GSPC.Adjusted)
+SPY = -diff(log(SP_index))
+SPY1 <- SPY[757:1950]
+
+head(SPY1)
+
+
+NASD_index <- (IXIC$IXIC.Adjusted)
+NASD = -diff(log(NASD_index))
+NASD1 <- NASD[757:1950]
+head(NASD1)
+
+n <- 90; m <- 20; T <- m*n
+
+# выборка значений, превышающих многомерный порог
+u <- c(sort(SPY1)[0.9*100],sort(NASD1)[0.9*100])
+ESM2 <- cbind(SPY1,NASD1)
+ESM3 <- ESM2[757:1950]
+t.ESM <- ESM2[(ESM2[,1]>u[1])&(ESM2[,2]>u[2]),] #матрица убытков сверх порога 90%
+
+alfa<- (ESM3[,2]>u[2])
+beta<- (ESM2[,1]>u[1])
+
+head(ESM2)
+head(ESM3)
+head(NASD)
+
+ESM4<-ESM2[2:length(ESM2),]
+
+ESM2[1]
+ESM2[,1]
+param<- ESM2[757:1950]
+tail(param)
+
+ttt<- ESM2[2:length(ESM2)]
+length(ESM2)
+
+# частные распределения на основе GED
+fit1 <- fpot(t.ESM[,1],threshold=u[1],model="gpd",method="SANN")
+fit2 <- fpot(t.ESM[,2],threshold=u[2],model="gpd",method="SANN")
+
+# значения частных функций распределения
+cdf1 <- pgpd(t.ESM[,1],loc=u[1],scale=fit1$par[1], shape=fit1$par[2])
+cdf2 <- pgpd(t.ESM[,2],loc=u[2],scale=fit2$par[1],shape=fit2$par[2])
+cdf_par <- cbind(cdf1,cdf2)
+
+# подгонка копулы
+gumb.fit <- fitCopula(cdf_par,copula=gumb.cop)
+gal.fit <- fitCopula(cdf_par,copula=gal.cop)
+
+gumb.fit@loglik
+gal.fit@loglik
+
+# модельные значения убытков
+cdf.sim <- rCopula(n=N,copula=gal.fit@copula)
+sim1 <- qgpd(cdf.sim[,1],loc=u[1],scale=fit1$par[1], shape=fit1$par[2])
+sim2 <- qgpd(cdf.sim[,2],loc=u[2],scale=fit2$par[1], shape=fit2$par[2])
+
+
+
+
+
+# Pareto
+# пороговое значение - 95% квантиль
+
+library(quantmod)
+QWERTY <- getSymbols("MSFT", src="yahoo")
+
+Y <- (MSFT$MSFT.Adjusted)
+n <- 90; m <- 20; T <- m*n
+
+MSFT2 = -diff(log(Y))
+u <- sort(MSFT2)[0.95*T]
+
+length(MSFT2)
+
+gpd.fit <- fpot(MSFT2,threshold=u,model="gpd",method="SANN")
+beta <- gpd.fit$estimate[1]; xi <- gpd.fit$estimate[2]
+
+Fu <- gpd.fit$pat
+alpha <- 1-1/260 # соответствует k = 4
+VaR <- u+beta/xi*(((1-alpha)/Fu)^(-xi)-1)
+ES <- (VaR+beta-xi*u)/(1-xi)
+
+
+
+# VaR curve 
+T <- length(MSFT2)
+# devide dataset on training sample and examining sample
+T1 <- 600; T2 <- T - T1
+VaR <- numeric()
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  h.MSFT <- MSFT2[(i-h):(i-1)]
+  MSFT.fit <- stepAIC.ghyp(h.MSFT,dist=c("gauss","t","ghyp","nig"), symmetric=NULL,silent=TRUE)
+  VaR[i-T1] <- qghyp(alpha,object=MSFT.fit$best.model)
+}
+
+fact <- MSFT2[(T1+1):(T1+T2)]
+plot(fact,type="l")
+plot(VaR, type="l")
+
+# Kupiec test
+
+K <- sum(fact<VaR); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
