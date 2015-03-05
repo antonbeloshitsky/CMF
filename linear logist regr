@@ -1,0 +1,53 @@
+getwd()
+setwd("C:/Users/Asus/Desktop/центр математических финансов мгу/machine learning")
+library(openxlsx)
+dat <- read.xlsx("LR_homeTask1.xlsx")
+head(dat)
+X <- dat[,1:2]; y <- dat[, 3]
+m<- nrow(X); n<- ncol(X)
+#Визуализиаия 
+X0 <- X[y==0,]; X1 <- X[y==1,]
+
+plot(X0, pch=2, col="blue", xlim=c(0,max(X[,1])),
+     ylim= c(0,max(X[,2])), xlab=expression(x[1]),
+     ylab=expression(x[2]), lwd=3)
+points(X1,pch=3, col="red", lwd=3)
+legend("topright", c("y=0","y=1"), pch=c(2,3),lwd=c(3,3),
+       col=c("blue", "red"), lty=c(0,0))
+
+# Добавление единичного регрессора в матрицу Х
+
+X <- cbind(1,X)
+
+# корректировка форматов переменных 
+y <- cbind(y);
+X<- as.matrix(X)
+
+# логистическая функция 
+g <- function(z) 1/(1+ exp(-z))
+
+# функция потерь
+J <- function(theta) {
+  m<-nrow(X)
+  h.theta <- g(X%*%theta)
+  -t(y)%*%log(h.theta)/m-t(1-y)%*%log(1-h.theta)/m
+}
+
+gradJ<- function(theta) {
+  m <- nrow(X)
+  t(X)%*%(g(X%*%theta)-y)/m
+}
+
+# начальные значения 
+theta0 <- cbind(rep(0,time=n+1))
+
+# числнная опитимизация 
+opt <- optim(fn = J, gr=gradJ, par = theta0, method = "BFGS")
+theta <- opt$par;Jval <- opt$value
+
+list(theta = as.vector(theta), J=Jval)
+
+x1 <- c(0,-theta[1]/theta[3])
+x2 <- c(-theta[1]/theta[2],0)
+lines(x1,x2,type="l",lwd=3)
+
