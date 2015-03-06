@@ -1,1 +1,94 @@
 oil companies portfolio selection
+library(Quandl)
+library(xts)
+require(gplots)
+library(quantmod)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+library(corrgram)
+library(ellipse)
+library(FactoMineR)
+library(Hmisc)
+library(car)
+library(tseries)
+library(PerformanceAnalytics)
+library(corrplot)
+library(fPortfolio)
+
+Quandl.auth("tbWQLVYq4t4VyifpXR54") # Это мой тулит. с его помощью я могу выкачивать любые данные с Квандла 
+
+startDate = as.Date("2014-01-05") # исследлуем данные за прошлый календарный год
+endDate = as.Date("2014-12-05") 
+
+#Попробуем по-старинке 
+
+EXXON.P <- Quandl("GOOG/NYSE_XOM", start_date = startDate, end_date = endDate, type = "xts")
+EXXON.P <- EXXON.P[,"Close"] 
+EXXON <- diff(log(EXXON.P), lag = 1)
+EXXON <- EXXON[-1,]
+BP.P <- Quandl("GOOG/NYSE_BP", start_date = startDate, end_date = endDate, type = "xts") 
+BP.P <- BP.P[,"Close"] 
+BP <- diff(log(BP.P), lag = 1)
+BP <- BP[-1,]
+Chevron.P <- Quandl("GOOG/NYSE_CVX", start_date = startDate, end_date = endDate, type = "xts") 
+Chevron.P <- Chevron.P[,"Close"]
+Chevron <- diff(log(Chevron.P), lag = 1)
+Chevron <- Chevron[-1,]
+TOTAL.P <- Quandl("GOOG/NYSE_TOT", start_date = startDate, end_date = endDate, type = "xts") 
+TOTAL.P <- TOTAL.P[,"Close"]
+TOTAL <- diff(log(TOTAL.P), lag = 1)
+TOTAL <- TOTAL[-1,]
+Conoco.P <- Quandl("GOOG/NYSE_COP", start_date = startDate, end_date = endDate, type = "xts") 
+Conoco.P <- Conoco.P[,"Close"]
+Conoco <- diff(log(Conoco.P), lag = 1)
+Conoco <- Conoco[-1,]
+
+EXXON_BP <- EXXON.P/BP.P # посчитали соотношение акций EXXON_BP 
+EXXON_Chevron <- EXXON.P/Chevron.P # посчитали соотношение акций EXXON_Chevron 
+EXXON_TOTAL <- EXXON.P/TOTAL.P # посчитали соотношение акций EXXON_TOTAL
+BP_Chevron <- BP.P/Chevron.P # посчитали соотношение акций BP_Chevron
+BP_TOTAL <- BP.P/TOTAL.P # посчитали соотношение акций BP_TOTAL
+Chevron_TOTAL <- Chevron.P/TOTAL.P # посчитали соотношение акций Chevron_TOTAL
+
+#  графики соотношения акций
+plot(EXXON_BP)
+plot(EXXON_Chevron)
+plot(EXXON_TOTAL)
+plot(BP_Chevron)
+plot(BP_TOTAL)
+plot(Chevron_TOTAL)
+
+# посчитаем беты акций 
+NYSE.P = get.hist.quote(instrument = "^NYA", start = startDate, end = endDate,
+                            quote = c("Close"), provider = "yahoo", origin = "2005-01-01", compression = "d", 
+                            retclass = "zoo")
+NYSE <- diff(log(NYSE.P), lag = 1)
+NYSE <- NYSE[-1,]
+
+EXXON.for<- EXXON[-1,]
+BP.for <- BP[-1,]
+Chevron.for <- Chevron[-1,]
+TOTAL.for <- TOTAL[-1,]
+Conoco.for <- Conoco[-1,]
+
+beta_Exxon <- (as.vector(EXXON.for)*as.vector(NYSE))/as.vector(cov((NYSE), method = c("spearman")))
+beta_BP <- (as.vector(BP.for)*as.vector(NYSE))/as.vector(cov((NYSE), method = c("spearman")))
+beta_Chevron <- (as.vector(Chevron.for)*as.vector(NYSE))/as.vector(cov((NYSE), method = c("spearman")))
+beta_TOTAL <- (as.vector(TOTAL.for)*as.vector(NYSE))/as.vector(cov((NYSE), method = c("spearman")))
+
+#Теперь необходимо определить долевые коэффициенты активов в Бета-нейтральном портфеле
+
+port<- merge(EXXON.for,BP.for,Chevron.for,TOTAL.for,Conoco.for, all = FALSE)
+colnames(port) <- c("EXXON","BP","Chevron","TOTAL", "Conoco") 
+
+corrplot.mixed(cor(port))
+
+frontier <- portfolioFrontier(port,spec = portfolioSpec(), constraints = "LongOnly")
+
+tailoredFrontierPlot(object = frontier)
+weightsPlot(frontier)
+chart.CumReturns(port, legend.loc = 'topleft', main = '')
+
+
+
