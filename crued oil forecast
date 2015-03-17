@@ -1,10 +1,11 @@
 library(Quandl)
-oil.ts <- Quandl("DOE/RBRTE", trim_start="1987-11-10", trim_end="2015-01-01", type="zoo")
-oil.tsw <-Quandl("DOE/RBRTE", trim_start="1987-11-10", trim_end="2015-01-01", type="zoo", collapse="weekly")
-oil.tsm <-Quandl("DOE/RBRTE", trim_start="1987-11-10", trim_end="2015-01-01", type="ts", collapse="monthly")
+oil.ts <- Quandl("DOE/RBRTE", trim_start="1987-11-1", trim_end="2015-02-01", type="zoo")
+oil.tsw <-Quandl("DOE/RBRTE", trim_start="1987-11-1", trim_end="2015-02-01", type="zoo", collapse="weekly")
+oil.tsm <-Quandl("DOE/RBRTE", trim_start="1987-11-1", trim_end="2015-02-01", type="ts", collapse="monthly")
 plot(oil.tsm, xlab="Year", ylab="Price, $", type="l")
 lines(lowess(oil.tsm), col="red", lty="dashed")
 plot(decompose(oil.tsm, type="multiplicative"))
+DDD<- decompose(oil.tsm, type="multiplicative")
 library(tseries)
 library(forecast)
 adf.test(oil.tsm, alternative=c('stationary'))
@@ -13,9 +14,51 @@ ndiffs(oil.tsm)
 L <- BoxCox.lambda(ts(oil.ts, frequency=260), method="loglik")
 Lw <- BoxCox.lambda(ts(oil.tsw, frequency=52), method="loglik")
 Lm <- BoxCox.lambda(oil.tsm, method="loglik")
-
-
 # Fit NN for long-run
+long <- ts(oil.ts[index(oil.ts) > "1988-11-01" & index(oil.ts) < "2013-12-31"])
+long.test <- as.numeric(oil.ts[index(oil.ts) >= "2014-01-01",])
+l <- length(long.test)
+
+fit.arima.long <- auto.arima(long, lambda=L)
+fcast.arima.long <- forecast(fit.arima.long, l, lambda=L)
+
+fit.nn.long <- nnetar(long, size=5, lambda=L)
+fcast.nn.long <- forecast(fit.nn.long, l, lambda=L)
+
+fit.tbats.long <-tbats(long, lambda=L)
+fcast.tbats.long <- forecast(fit.tbats.long, l, lambda=L)
+
+par(mfrow=c(3, 1))
+plot(fcast.arima.long)
+plot(fcast.nn.long)
+plot(fcast.tbats.long)
+
+plot(long.test, type="l", col="red", lwd=5, xlab="Day", ylab="Price, $", main="Прогноз на 2014",
+     ylim=c(min(long.test, fcast.arima.long$mean, fcast.tbats.long$mean, fcast.nn.long$mean),
+            max(long.test, fcast.arima.long$mean, fcast.tbats.long$mean, fcast.nn.long$mean)))
+lines(as.numeric(fcast.nn.long$mean), col="green", lwd=3,lty=2)
+lines(as.numeric(fcast.tbats.long$mean), col="magenta", lwd=3,lty=2)
+lines(as.numeric(fcast.arima.long$mean), col="blue", lwd=3, lty=2)
+legend("topright", legend=c("Real Data","NeuralNet","TBATS", "ARIMA"), 
+       col=c("red","green", "magenta","blue"), lty=c(1,2,2,2), lwd=c(5,3,3,3))
+grid()
+
+mape <- function(r, f){
+  len <- length(r)
+  return(sum( abs(r - f$mean[1:len]) / r) / len * 100)
+}
+mape(long.test, fcast.arima.long)
+mape(long.test, fcast.nn.long)
+mape(long.test, fcast.tbats.long)
+
+
+
+
+
+
+
+
+
 fit.nn <- nnetar(ts(oil.ts, frequency=260), lambda=L, size=3)
 fcast.nn <- forecast(fit.nn, h=520, lambda=L)
 
@@ -31,8 +74,8 @@ plot(fcast.nnw, include=208)
 plot(fcast.nnm, include=48)
 
 # Fit ARIMA, NN and ETS for short-run
-short <- ts(oil.ts[index(oil.ts) > "2014-06-30" & index(oil.ts) < "2014-12-01"], frequency=20)
-short.test <- as.numeric(oil.ts[index(oil.ts) >= "2014-12-01",])
+short <- ts(oil.ts[index(oil.ts) > "2014-06-30" & index(oil.ts) < "2014-12-31"], frequency=20)
+short.test <- as.numeric(oil.ts[index(oil.ts) >= "2015-01-01",])
 h <- length(short.test)
 
 fit.arima <- auto.arima(short, lambda=L)
@@ -50,7 +93,7 @@ plot(fcast.nn, include=3*h)
 plot(fcast.tbats, include=3*h)
 
 par(mfrow=c(1, 1))
-plot(short.test, type="l", col="red", lwd=5, xlab="Day", ylab="Price, $", main="December prices",
+plot(short.test, type="l", col="red", lwd=5, xlab="Day", ylab="Price, $", main="Январь 2015",
      ylim=c(min(short.test, fcast.arima$mean, fcast.tbats$mean, fcast.nn$mean),
             max(short.test, fcast.arima$mean, fcast.tbats$mean, fcast.nn$mean)))
 lines(as.numeric(fcast.nn$mean), col="green", lwd=3,lty=2)
