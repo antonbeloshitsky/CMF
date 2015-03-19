@@ -1,0 +1,132 @@
+library(PerformanceAnalytics)
+library(zoo)
+library(tseries)
+library(fBasics)
+library(stats)
+library(ghyp)
+
+YNDX <- get.hist.quote(instrument = "yndx", start = "2014-01-01", end = "2014-12-31", 
+                       compression = "d", retclass = "zoo",quote = "Close", provider = "yahoo")
+
+# Немного описательных статистик
+str(YNDX)
+head(YNDX)
+summary(YNDX)
+basicStats(YNDX)
+
+YR <- diff(log(YNDX)) #Переходим от цен к доходностям
+
+plot(YR) # График доходности акций Яндекса
+histPlot(timeSeries(YR)) # среднее значение доходности = -0,3%, тяжелый левый хвост говорит нам о периодических просадках цены акции на 10 и более процентов
+qqnormPlot(YR) # тяжесть левых хвостов видна на графике квантиль квантиль
+
+YR<- ts(YR)
+str(YR)
+summary(YR)
+acf(YR) # автокорреляции нет
+
+#тест на нормальность
+qqnormPlot(YR)
+jarqueberaTest(YR) # p-value < 2.2e-16 что говорит о высокой вероятности ненормальности распределения
+
+#тест на стационарность
+adf.test(YR) # p-value =0.01 Что говорит о стационарности временного ряда
+
+# оценка параметров распределения  Выбор наилучшей модели распределения с помощью криетрия акаике
+YR.GHYP.SF<- fit.ghypuv(YR,symmetric = FALSE, silent=T) # обобщенное гиперболическое несимметричное
+YR.GHYP.ST<- fit.ghypuv(YR,symmetric = T, silent=T) # обобщенное гиперболическое симметричное
+
+#Выбор наилучшей модели из двух.
+lik.ratio.test(YR.GHYP.SF,YR.GHYP.ST,conf.level=0.95)
+# обощенное несимметричное иперболическое распределние лучше чем, 
+#симметричное, описывает распределение доходности акции Яндекс
+
+YR.T.SF<-fit.tuv(YR,symmetric = FALSE, silent=T)# распределение стьюдента несимметричное
+YR.T.ST<- fit.tuv(YR,symmetric = T, silent=T)#распределение стьюдента симметричное
+YR.NIG.SF <- fit.NIGuv(YR,symmetric = F, silent=T) # нормально обратное распределение гауса нессиметричное
+YR.NIG.ST <- fit.NIGuv(YR,symmetric = T, silent=T) # нормально обратное распределение гауса симметричное
+YR.VG.SF<- fit.VGuv(YR,mu=T,symmetric = F,silent=T) # Варианс-гамма распределение несимметричное
+YR.VG.ST<- fit.VGuv(YR,mu=T,symmetric = T,silent=T) # Варианс-гамма распределение симметричное
+YR.G<- fit.gaussuv(YR)#  гаусовское распределение
+
+# график расчтеных и фактического распределения
+YR.D<- density(YR,n=1024,bw="nrd")
+plot(YR.D, type="l",col="5",lwd="3")
+lines(YR.GHYP.SF, type="l",lty="dashed",col="2")
+lines(YR.GHYP.ST, type="l",lty="dotted",col="2")
+lines(YR.T.SF, type="l",lty="dashed",col="1")
+lines(YR.T.ST, type="l",lty="dotted",col="1")
+lines(YR.NIG.SF, type="l",lty="dashed",col="3")
+lines(YR.NIG.ST, type="l",lty="dotted", col="3")
+lines(YR.VG.SF, type='l', lty="dashed", col="4")
+lines(YR.VG.ST, type="l", lty="dotted", col="4")
+lines(YR.G, type="l",lty="longdash",col="6")
+
+# Информационный криетрий Акаике для оценки избыточности параметров  модели 
+
+aic.uv <- stepAIC.ghyp(YR,dist=c("gauss","t","ghyp","hyp","nig","VG"), symmetric=NULL,silent=TRUE)
+summary(aic.uv$best.model)
+aic.uv$fit.table
+r.best <- aic.uv$best.model #лучшей признана модель ассиметричного распределения Т-Стьюдента
+#Оно обладает наибольшим значение логарифмической функции правдоподобия и наименьшим значением критерия Акаике. 
+# В то же время ассиметричное гиперболическое и вега-гамма распределение показывают высокое значение функци правдоподобия
+N<-10^6
+
+#Проведем тест и выясним, какое из трех видов распределения лучше всего описывает поведение доходности акций Яндкса
+# для этого сгенерируем случайные значения на основании подогнанных моделей 
+STUD.gen <- rghyp(n=N,object=r.best)
+GHYP.gen <- rghyp(n=N, object=YR.GHYP.SF)
+VG.gen <- rghyp(n=N,object=YR.VG.SF)
+
+ks.test(YR,STUD.gen) #p-value = 0.9994
+ks.test(YR,GHYP.gen) #p-value = 0.9998
+ks.test(YR,VG.gen) #p-value = 0.9941
+
+# Таким образом мы получили 2 вида моделей распределения,
+#которые очнь хорошо описывают доходность акций Яндекса.
+# оценим модель в понятиях риска 
+
+length(YR)
+T1 <- 200
+T2<-51
+alpha<-0.05 # вероятность потерь
+
+r.sim.STUD <- sort(rghyp(n=N,object=r.best))
+r.sim.ghyp <- sort(rghyp(n=N, object=YR.GHYP.SF))
+
+#первый способ
+VaR.STUD.1 <- r.sim.STUD[alpha*N] # -0.05377846
+VaR.ghyp.1 <- r.sim.ghyp[alpha*N] # -0.05469092
+
+# второй способ
+VaR.STUD.2 <- qghyp(alpha,object=r.best) # -0.05375555
+VaR.ghyp.2 <- qghyp(alpha,object=YR.GHYP.SF) #-0.05458216
+
+ES.STUD <- mean(r.sim.STUD[1:(alpha*N-1)]) # -0.08169396
+ES.ghyp <- mean(r.sim.ghyp[1:(alpha*N-1)]) # -0.08020665
+
+# Строим кривую VaR. Эта кривая поможет нам выбрать наилучшую модель из двух
+#Кривая VaR — набор последовательных во времени значений VaR
+# VaR для модели Стьюдента
+
+VaR <- numeric()
+h <- T1
+for (i in (T1+1):(T1+T2)) {
+  h.r <- YR[(i-h):(i-1)]
+  r.fit <- stepAIC.ghyp(h.r,dist=c("gauss","t","hyp","ghyp","nig"),
+                        symmetric=NULL,silent=TRUE)
+  VaR[i-T1] <- qghyp(alpha,object=r.fit$best.model)
+}
+fact <- YR[(T1+1):(T1+T2)]
+plot(fact,type="l")
+lines(VaR,col="red",lwd=2)
+
+# Сравнение оценок риска с фактом
+K <- sum(fact<VaR); alpha0 <- K/T2
+S <- -2*log((1-alpha)^(T2-K)*alpha^K)+2*log((1-alpha0)^(T2-K)*alpha0^K)
+p.value <- 1-pchisq(S,df=1)
+L.Lo <- (sum((fact-VaR)^2*(fact<VaR))/K)*10^4
+L.BI <- sum((fact-VaR)/VaR*(fact<VaR))/K
+list("alpha" = alpha, "alpha0" = alpha0, "p.value" = p.value)
+L.Lo
+L.BI
