@@ -1,0 +1,35 @@
+getwd()
+setwd("C:/Users/Asus/Desktop/центр математических финансов мгу/machine learning/exam")
+library(openxlsx)
+train <- read.csv("exam_titanic_train.csv")
+head(train)
+test <- read.csv("exam_titanic_test.csv")
+head(test)
+CV<- read.csv("exam_titanic_CV.csv")
+str(CV)
+
+str(test)
+str(train)
+
+library(randomForest)
+library(plyr)
+
+summary(train)
+
+# Create random forest based on PCLASS, SEX, FARE, and AGE
+forest <- randomForest(formula = as.factor(Survived) ~ Sex + Pclass+ Age + Fare, 
+                       data = train, ntree = 10000, importance = TRUE)
+summary(forest)
+importance(forest)
+
+predicted <- predict(forest, test)
+plot(predicted)
+
+predicted1 <- as.data.frame(predicted)
+
+library(party)
+titanic.ctree = ctree(as.factor(Survived) ~ Pclass + Sex + Age + SibSp, data=train)
+predicted.ctree <- predict(titanic.ctree,test)
+
+plot(titanic.ctree) 
+plot(predicted.ctree)
